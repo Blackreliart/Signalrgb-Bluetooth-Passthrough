@@ -8,9 +8,9 @@ add-on communication API does not expose BLE directly.
 
 ## Files
 
-- `GoveeBluetoothAddon.js` — SignalRGB device source. Samples the one-pixel
-  canvas, announces the fixed virtual device through `DiscoveryService()`, and
-  sends color changes to the local bridge over UDP.
+- `GoveeBluetoothAddon.js` — SignalRGB Add-on source. Polls the bridge status,
+  announces the virtual device only after BLE is connected, provides lighting
+  controls/settings, and sends canvas color changes over UDP.
 - `GoveeBluetoothAddon.qml` — Add-on information panel.
 - `bridge.py` — local BLE bridge, device scanner, and H6001 command encoder.
 
@@ -34,10 +34,11 @@ messages:
 - `{"command":"color","rgb":[255,0,0]}` — set the bulb color.
 - `{"command":"disconnect"}` — disconnect.
 
-Start the bridge before activating the SignalRGB add-on. The add-on sends color
-updates automatically after the BLE connection is established. The Add-on
-panel currently displays setup information. To target a different bulb later,
-change `TARGET_ADDRESS` and `TARGET_NAME` in `bridge.py`.
+Start the bridge before activating the SignalRGB add-on. After the BLE link is
+up, the add-on should announce a separate H6001 device in SignalRGB; its lighting
+page includes the output toggle and frame delay setting. The add-on panel shows
+setup information. To target a different bulb later, change `TARGET_ADDRESS`
+and `TARGET_NAME` in `bridge.py` and `TARGET_ADDRESS` in the add-on source.
 
 ## SignalRGB Add-on
 

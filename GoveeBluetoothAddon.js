@@ -9,7 +9,7 @@ const BRIDGE_PORT = 8765;
 const CONTROLLER_ID = `govee-h6001-${TARGET_ADDRESS.replaceAll(":", "").toLowerCase()}`;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.2.0"; }
+export function Version() { return "0.3.0"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -51,25 +51,56 @@ class H6001Controller {
 
 export function DiscoveryService() {
     this.IconUrl = "";
-    this.PollInterval = 5000;
+    this.PollInterval = 1000;
     this.lastPollTime = 0;
     this.controller = null;
+    this.connected = false;
+    this.controlSocket = null;
+    this.replySocket = null;
 
     this.Initialize = function () {
-        this.controller = new H6001Controller();
-        if (!service.hasController(CONTROLLER_ID)) {
-            service.addController(this.controller);
-            service.announceController(this.controller);
-            service.log(`Announced ${this.controller.name} (${TARGET_ADDRESS})`);
-        }
+        this.controlSocket = udp.createSocket();
+        this.replySocket = udp.createSocket();
+        this.replySocket.on("message", this.handleBridgeMessage.bind(this));
+        this.replySocket.on("error", (error) => service.log(`Bridge UDP error: ${error}`));
+        this.replySocket.bind(8766);
+        this.lastPollTime = 0;
     };
 
     this.Update = function () {
-        if (!this.controller) this.Initialize();
-        if (!service.hasController(CONTROLLER_ID)) {
+        const now = Date.now();
+        if (!this.controlSocket || now - this.lastPollTime < this.PollInterval) return;
+        this.lastPollTime = now;
+        this.controlSocket.write(JSON.stringify({ command: "status" }), BRIDGE_HOST, BRIDGE_PORT);
+    };
+
+    this.handleBridgeMessage = function (packet) {
+        let message;
+        try {
+            message = JSON.parse(packet.data);
+        } catch (error) {
+            service.log(`Invalid bridge response: ${error}`);
+            return;
+        }
+        if (message.type !== "status") return;
+
+        if (message.connected && !this.connected) {
+            this.controller = new H6001Controller();
             service.addController(this.controller);
             service.announceController(this.controller);
+            this.connected = true;
+            service.log(`H6001 connected and announced: ${TARGET_ADDRESS}`);
+        } else if (!message.connected && this.connected) {
+            if (this.controller) service.removeController(this.controller);
+            this.controller = null;
+            this.connected = false;
+            service.log("H6001 disconnected; removed SignalRGB device.");
         }
+    };
+
+    this.Shutdown = function () {
+        if (this.controlSocket) this.controlSocket.close();
+        if (this.replySocket) this.replySocket.close();
     };
 }
 

@@ -21,7 +21,7 @@ Item {
         Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: "Starte zuerst bridge.py. Die Bridge sucht deine H6001 und verbindet sie per Bluetooth. Dieses Add-on sendet die SignalRGB-Farbe lokal an die Bridge (UDP 127.0.0.1:8765)."
+            text: "Starte zuerst bridge.py. Nach der Bluetooth-Verbindung meldet das Add-on die H6001 als eigenes Gerät bei SignalRGB an. Dort erhält sie eine eigene Geräteseite mit Beleuchtungs- und Einstellungen-Tab."
         }
 
         RowLayout {
@@ -34,7 +34,7 @@ Item {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: "#d9a441"
-            text: "Hinweis: Die BLE-Suche und Geräteauswahl laufen im ersten Prototyp in der Bridge-Konsole. Eine direkte Steuerung ohne Bridge ist in SignalRGBs dokumentierter Schnittstelle nicht verfügbar."
+            text: "Das Add-on prüft den Bridge-Status lokal über UDP. Die Bridge muss laufen und mit Minger_H6001_0BF9 verbunden sein."
         }
     }
 }
