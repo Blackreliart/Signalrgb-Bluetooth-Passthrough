@@ -55,6 +55,9 @@ class Bridge(asyncio.DatagramProtocol):
 
     def reply(self, addr: tuple[str, int], message: dict[str, Any]) -> None:
         if self.transport:
+            if message.get("type") == "status":
+                log.info("Status-Antwort an %s:%s: connected=%s",
+                         addr[0], addr[1], message.get("connected"))
             self.transport.sendto(json.dumps(message).encode("utf-8"), addr)
 
     async def handle(self, message: dict[str, Any], addr: tuple[str, int]) -> None:

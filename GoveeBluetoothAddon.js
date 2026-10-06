@@ -9,7 +9,7 @@ const BRIDGE_PORT = 8765;
 const CONTROLLER_ID = `govee-h6001-${TARGET_ADDRESS.replaceAll(":", "").toLowerCase()}`;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.3.1"; }
+export function Version() { return "0.3.2"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -28,27 +28,6 @@ export function ControllableParameters() {
     ];
 }
 
-class H6001Controller {
-    constructor() {
-        this.device = {
-            id: CONTROLLER_ID,
-            address: TARGET_ADDRESS,
-            name: "Minger H6001 (Bluetooth)",
-            leds: 1,
-            getName() { return this.name; }
-        };
-        this.id = CONTROLLER_ID;
-        this.name = this.device.name;
-        this.changed = false;
-        this.connected = false;
-        this.statusData = {};
-        this.messageQueue = [];
-    }
-    toCacheJSON() {
-        return { id: this.id, address: TARGET_ADDRESS, name: this.name, leds: 1 };
-    }
-}
-
 export function DiscoveryService() {
     this.IconUrl = "";
     this.PollInterval = 1000;
@@ -57,12 +36,39 @@ export function DiscoveryService() {
     this.connected = false;
     this.socket = null;
 
+    // Keep the factory inside DiscoveryService. SignalRGB evaluates service
+    // callbacks in its own context, so an outer class declaration is not visible.
+    this.makeController = function () {
+        const goveeDevice = {
+            id: CONTROLLER_ID,
+            address: TARGET_ADDRESS,
+            name: "Minger H6001 (Bluetooth)",
+            leds: 1,
+            type: 3,
+            split: 1,
+            getName: function () { return this.name; }
+        };
+        return {
+            device: goveeDevice,
+            id: CONTROLLER_ID,
+            name: goveeDevice.name,
+            changed: false,
+            connected: true,
+            statusData: {},
+            messageQueue: [],
+            toCacheJSON: function () {
+                return { id: CONTROLLER_ID, address: TARGET_ADDRESS, name: goveeDevice.name, leds: 1, type: 3, split: 1 };
+            }
+        };
+    };
+
     this.Initialize = function () {
         // Use the same bound UDP socket for requests and replies. Otherwise the
         // bridge answers the ephemeral source port and SignalRGB never sees status.
         this.socket = udp.createSocket();
         this.socket.on("message", this.handleBridgeMessage.bind(this));
-        this.socket.on("error", (error) => service.log(`Bridge UDP error: ${error}`));
+        this.socket.on("error", (errorId, errorMessage) =>
+            service.log(`Bridge UDP error ${errorId}: ${errorMessage || ""}`));
         this.socket.bind(8766);
         service.log("Govee add-on status socket bound to UDP 8766");
         this.lastPollTime = 0;
@@ -87,7 +93,8 @@ export function DiscoveryService() {
         if (message.type !== "status") return;
 
         if (message.connected && !this.connected) {
-            this.controller = new H6001Controller();
+            this.controller = this.makeController();
+            service.log("Registering H6001 controller with SignalRGB");
             service.addController(this.controller);
             service.announceController(this.controller);
             this.connected = true;

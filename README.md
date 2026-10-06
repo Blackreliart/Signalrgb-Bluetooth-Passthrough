@@ -46,8 +46,9 @@ and `TARGET_NAME` in `bridge.py` and `TARGET_ADDRESS` in the add-on source.
 Add this GitHub repository as a SignalRGB Add-on after pushing it to GitHub.
 SignalRGB's Add-on loader and UI have version-specific expectations, so the
 source may need minor adjustments for the installed SignalRGB version. Version
-0.2.0 now includes the discovery service needed to announce the virtual H6001
-device. It has not yet been tested in SignalRGB or against the physical bulb.
+0.3.2 keeps the controller factory inside the SignalRGB discovery-service
+callback and logs the registration step. It has not yet been retested in
+SignalRGB after this correction.
 
 ## H6001 protocol
 
