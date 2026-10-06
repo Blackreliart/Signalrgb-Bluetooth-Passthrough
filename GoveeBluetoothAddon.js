@@ -6,10 +6,9 @@ import udp from "@SignalRGB/udp";
 const TARGET_ADDRESS = "A4:C1:38:75:0B:F9";
 const BRIDGE_HOST = "127.0.0.1";
 const BRIDGE_PORT = 8765;
-const CONTROLLER_ID = `govee-h6001-${TARGET_ADDRESS.replaceAll(":", "").toLowerCase()}`;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.3.2"; }
+export function Version() { return "0.3.3"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -29,6 +28,10 @@ export function ControllableParameters() {
 }
 
 export function DiscoveryService() {
+    // SignalRGB evaluates DiscoveryService callbacks in a service context. Keep
+    // identifiers inside that context instead of relying on module constants.
+    const serviceTargetAddress = "A4:C1:38:75:0B:F9";
+    const serviceControllerId = "govee-h6001-a4c138750bf9";
     this.IconUrl = "";
     this.PollInterval = 1000;
     this.lastPollTime = 0;
@@ -40,8 +43,8 @@ export function DiscoveryService() {
     // callbacks in its own context, so an outer class declaration is not visible.
     this.makeController = function () {
         const goveeDevice = {
-            id: CONTROLLER_ID,
-            address: TARGET_ADDRESS,
+            id: serviceControllerId,
+            address: serviceTargetAddress,
             name: "Minger H6001 (Bluetooth)",
             leds: 1,
             type: 3,
@@ -50,14 +53,14 @@ export function DiscoveryService() {
         };
         return {
             device: goveeDevice,
-            id: CONTROLLER_ID,
+            id: serviceControllerId,
             name: goveeDevice.name,
             changed: false,
             connected: true,
             statusData: {},
             messageQueue: [],
             toCacheJSON: function () {
-                return { id: CONTROLLER_ID, address: TARGET_ADDRESS, name: goveeDevice.name, leds: 1, type: 3, split: 1 };
+                return { id: serviceControllerId, address: serviceTargetAddress, name: goveeDevice.name, leds: 1, type: 3, split: 1 };
             }
         };
     };
@@ -98,7 +101,7 @@ export function DiscoveryService() {
             service.addController(this.controller);
             service.announceController(this.controller);
             this.connected = true;
-            service.log(`H6001 connected and announced: ${TARGET_ADDRESS}`);
+            service.log(`H6001 connected and announced: ${serviceTargetAddress}`);
         } else if (!message.connected && this.connected) {
             if (this.controller) service.removeController(this.controller);
             this.controller = null;
