@@ -50,6 +50,7 @@ class Bridge(asyncio.DatagramProtocol):
         except (UnicodeDecodeError, json.JSONDecodeError):
             self.reply(addr, {"type": "error", "error": "Ungültiges JSON"})
             return
+        log.info("UDP-Befehl von %s:%s: %s", addr[0], addr[1], message.get("command", "?"))
         asyncio.create_task(self.handle(message, addr))
 
     def reply(self, addr: tuple[str, int], message: dict[str, Any]) -> None:
@@ -114,7 +115,7 @@ class Bridge(asyncio.DatagramProtocol):
             raise ValueError("rgb muss [R,G,B] sein")
         packet = make_color_packet(rgb)
         if not self.client or not self.client.is_connected:
-            return
+            raise RuntimeError("H6001 ist nicht per Bluetooth verbunden")
         color = tuple(rgb)
         now = asyncio.get_running_loop().time()
         # Ignore unchanged frames; cap writes at 20 per second for BLE stability.
@@ -126,6 +127,7 @@ class Bridge(asyncio.DatagramProtocol):
         await self.client.write_gatt_char(WRITE_UUID, packet, response=False)
         self.last_send = asyncio.get_running_loop().time()
         self.last_rgb = color
+        log.info("Farbe an H6001 gesendet: #%02X%02X%02X", *rgb)
 
 
 async def main() -> None:

@@ -100,6 +100,7 @@ export function Render() {
     if (key === lastColor) return;
 
     socket.write(JSON.stringify({ command: "color", rgb }), BRIDGE_HOST, BRIDGE_PORT);
+    device.log(`Sent color to BLE bridge: RGB ${key}`);
     lastColor = key;
     lastFrameAt = now;
 }
