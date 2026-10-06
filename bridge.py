@@ -8,17 +8,31 @@ import json
 import logging
 import os
 import socket
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import tkinter as tk
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from tkinter import ttk
 from typing import Any
 
 import pystray
 from bleak import BleakClient, BleakScanner
 from PIL import Image, ImageDraw
+from PySide6.QtCore import QObject, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMainWindow,
+    QPushButton,
+    QSlider,
+    QSystemTrayIcon,
+    QVBoxLayout,
+    QWidget,
+)
 
 SERVICE_UUID = "00010203-0405-0607-0809-0a0b0c0d1910"
 WRITE_UUID = "00010203-0405-0607-0809-0a0b0c0d2b11"
@@ -320,16 +334,9 @@ class TrayApp:
     def __init__(self) -> None:
         self.loop = asyncio.new_event_loop()
         self.bridge: Bridge | None = None
-        self.root: tk.Tk | None = None
         self.icon: pystray.Icon | None = None
-        self.status_var: tk.StringVar | None = None
-        self.mode_var: tk.StringVar | None = None
-        self.sync_var: tk.BooleanVar | None = None
-        self.power_button: ttk.Button | None = None
-        self.temperature_var: tk.IntVar | None = None
-        self.temperature_value: ttk.Label | None = None
-        self.pin_copy_var: tk.StringVar | None = None
-        self._white_after: str | None = None
+        self.status_text = "Starte Bridge …"
+        self.mode_text = "Warmweiß · 2700 K"
         self._closing = False
         self.http_server: ThreadingHTTPServer | None = None
         self.access_pin = f"{secrets.randbelow(1_000_000):06d}"
@@ -337,15 +344,11 @@ class TrayApp:
 
     def start(self) -> None:
         threading.Thread(target=self._run_event_loop, name="GoveeBLE", daemon=True).start()
-        self.root = tk.Tk()
-        self.root.title("Govee H6001 Bridge")
-        self.root.geometry("410x500")
-        self.root.resizable(False, False)
-        self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
-        self._build_ui()
-        self._start_tray()
         self._start_web_server()
-        self.root.mainloop()
+        self._start_tray()
+        webbrowser.open("http://127.0.0.1:8767")
+        if self.icon:
+            self.icon.run()
 
     @staticmethod
     def _find_lan_ip() -> str:
@@ -457,69 +460,22 @@ class TrayApp:
             log.exception("Bridge konnte nicht gestartet werden")
             self.set_status(f"UDP-Port {BRIDGE_PORT} belegt: {exc}")
 
-    def _build_ui(self) -> None:
-        assert self.root is not None
-        outer = ttk.Frame(self.root, padding=18)
-        outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="Govee H6001", font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        ttk.Label(outer, text="Handy-Steuerung im selben WLAN", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 0))
-        ttk.Label(outer, text=f"Adresse: {self.lan_url}").pack(anchor="w", pady=(2, 0))
-        pin_row = ttk.Frame(outer)
-        pin_row.pack(fill="x", pady=(2, 0))
-        ttk.Label(pin_row, text=f"PIN: {self.access_pin}", font=("Segoe UI", 11, "bold")).pack(side="left")
-        ttk.Button(pin_row, text="PIN kopieren", command=self.copy_pin).pack(side="left", padx=(10, 0))
-        self.pin_copy_var = tk.StringVar(value="")
-        ttk.Label(pin_row, textvariable=self.pin_copy_var, foreground="#287a36").pack(side="left", padx=(8, 0))
-        self.status_var = tk.StringVar(value="Starte Bridge …")
-        ttk.Label(outer, textvariable=self.status_var, wraplength=370).pack(anchor="w", pady=(6, 14))
-
-        controls = ttk.Frame(outer)
-        controls.pack(fill="x")
-        self.power_button = ttk.Button(controls, text="Lampe ausschalten", command=self.toggle_power)
-        self.power_button.pack(side="left")
-        self.sync_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(controls, text="SignalRGB-Sync", variable=self.sync_var,
-                        command=self.toggle_sync).pack(side="right")
-        ttk.Button(outer, text="Bluetooth neu verbinden", command=self.reconnect).pack(anchor="w", pady=(8, 0))
-
-        ttk.Separator(outer).pack(fill="x", pady=16)
-        ttk.Label(outer, text="Weißtemperatur", font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        self.temperature_var = tk.IntVar(value=2700)
-        self.temperature_value = ttk.Label(outer, text="2700 K")
-        self.temperature_value.pack(anchor="e")
-        slider = ttk.Scale(outer, from_=MIN_KELVIN, to=MAX_KELVIN, orient="horizontal",
-                           command=self.on_temperature_change)
-        slider.set(2700)
-        slider.pack(fill="x", pady=(0, 6))
-        ttk.Label(outer, text="Warm 2700 K                              Kalt 6500 K").pack(anchor="w")
-
-        self.mode_var = tk.StringVar(value="Warmweiß · 2700 K")
-        ttk.Label(outer, textvariable=self.mode_var, foreground="#555555").pack(anchor="w", pady=(14, 0))
-        ttk.Label(outer, text="Schließen blendet das Fenster nur in den Infobereich aus.",
-                  foreground="#777777", wraplength=370).pack(anchor="w", pady=(8, 0))
-        ttk.Button(outer, text="Beenden · Lampe auf WW-Kaltweiß", command=self.quit).pack(anchor="w", pady=(12, 0))
-
-    def copy_pin(self) -> None:
-        if not self.root:
-            return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(self.access_pin)
-        self.root.update_idletasks()
-        if self.pin_copy_var:
-            self.pin_copy_var.set("Kopiert")
-
     def _start_tray(self) -> None:
         image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
         draw.ellipse((8, 8, 56, 56), fill=(80, 170, 255, 255), outline=(245, 245, 245, 255), width=3)
         draw.ellipse((22, 22, 42, 42), fill=(255, 255, 255, 255))
         menu = pystray.Menu(
-            pystray.MenuItem("Govee H6001 öffnen", self.show_window, default=True),
+            pystray.MenuItem("Steuerung im Browser öffnen", self.show_window, default=True),
+            pystray.MenuItem(f"Handy: {self.lan_url}", None, enabled=False),
+            pystray.MenuItem(f"PIN: {self.access_pin}", None, enabled=False),
             pystray.MenuItem("Lampe Ein/Aus", self.tray_toggle_power),
+            pystray.MenuItem("SignalRGB-Sync umschalten", self.tray_toggle_sync),
+            pystray.MenuItem("Bluetooth neu verbinden", self.tray_reconnect),
             pystray.MenuItem("Beenden · WW-Kaltweiß", self.quit),
         )
         self.icon = pystray.Icon("Govee H6001 Bridge", image, "Govee H6001 Bridge", menu)
-        self.icon.run_detached()
+        
 
     def submit(self, coroutine: Any) -> None:
         if self.loop.is_running():
@@ -541,57 +497,38 @@ class TrayApp:
     def tray_toggle_power(self, _icon: Any, _item: Any) -> None:
         self.toggle_power()
 
+    def tray_toggle_sync(self, _icon: Any, _item: Any) -> None:
+        if self.bridge:
+            self.submit(self.bridge.set_signalrgb(not self.bridge.signalrgb_enabled))
+
+    def tray_reconnect(self, _icon: Any, _item: Any) -> None:
+        self.reconnect()
+
     def toggle_sync(self) -> None:
-        if self.bridge and self.sync_var:
-            self.submit(self.bridge.set_signalrgb(self.sync_var.get()))
+        if self.bridge:
+            self.submit(self.bridge.set_signalrgb(not self.bridge.signalrgb_enabled))
 
     def reconnect(self) -> None:
         if self.bridge:
             self.submit(self.bridge.reconnect())
 
-    def on_temperature_change(self, value: str) -> None:
-        kelvin = round(float(value) / 50) * 50
-        if self.temperature_value:
-            self.temperature_value.configure(text=f"{kelvin} K")
-        if self._white_after and self.root:
-            self.root.after_cancel(self._white_after)
-        if self.root:
-            self._white_after = self.root.after(180, lambda: self.apply_white(kelvin))
-
-    def apply_white(self, kelvin: int) -> None:
-        self._white_after = None
-        if self.sync_var:
-            self.sync_var.set(False)
-        log.info("Weißtemperatur-Regler: %d K", kelvin)
-        if self.bridge:
-            self.submit(self.bridge.set_white(kelvin))
-
     def set_status(self, message: str) -> None:
         log.info("Status: %s", message)
-        if self.root and self.status_var:
-            self.root.after(0, lambda: self.status_var.set(message) if self.status_var else None)
+        self.status_text = message
 
     def set_mode(self, message: str) -> None:
-        if self.root and self.mode_var:
-            self.root.after(0, lambda: self.mode_var.set(message) if self.mode_var else None)
+        self.mode_text = message
 
     def set_power_state(self, enabled: bool) -> None:
-        if self.root and self.power_button:
-            label = "Lampe ausschalten" if enabled else "Lampe einschalten"
-            self.root.after(0, lambda: self.power_button.configure(text=label) if self.power_button else None)
+        if self.icon:
+            self.icon.update_menu()
 
     def set_sync_state(self, enabled: bool) -> None:
-        if self.root and self.sync_var:
-            self.root.after(0, lambda: self.sync_var.set(enabled) if self.sync_var else None)
+        if self.icon:
+            self.icon.update_menu()
 
     def show_window(self, _icon: Any = None, _item: Any = None) -> None:
-        if self.root:
-            self.root.after(0, self.root.deiconify)
-            self.root.after(0, self.root.lift)
-
-    def hide_window(self) -> None:
-        if self.root:
-            self.root.withdraw()
+        webbrowser.open("http://127.0.0.1:8767")
 
     def quit(self, _icon: Any = None, _item: Any = None) -> None:
         if self._closing:
@@ -610,12 +547,288 @@ class TrayApp:
             self.http_server.server_close()
         if self.loop.is_running():
             self.loop.call_soon_threadsafe(self.loop.stop)
-        if self.root:
-            self.root.after(0, self.root.destroy)
+
+
+class GuiSignals(QObject):
+    status = Signal(str)
+    mode = Signal(str)
+    power = Signal(bool)
+    sync = Signal(bool)
+
+
+class NativeTrayApp(TrayApp):
+    """Native Windows desktop window; the web page remains for phones."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.qt_app: QApplication | None = None
+        self.window: QMainWindow | None = None
+        self.tray_icon: QSystemTrayIcon | None = None
+        self.signals = GuiSignals()
+        self.status_label: QLabel | None = None
+        self.mode_label: QLabel | None = None
+        self.power_button: QPushButton | None = None
+        self.sync_checkbox: QCheckBox | None = None
+        self.kelvin_slider: QSlider | None = None
+        self.kelvin_label: QLabel | None = None
+        self._white_timer: QTimer | None = None
+
+    def start(self) -> None:
+        self.qt_app = QApplication(sys.argv)
+        self.qt_app.setQuitOnLastWindowClosed(False)
+        self.signals.status.connect(self._show_status)
+        self.signals.mode.connect(self._show_mode)
+        self.signals.power.connect(self._show_power)
+        self.signals.sync.connect(self._show_sync)
+        self._build_native_window()
+        threading.Thread(target=self._run_event_loop, name="GoveeBLE", daemon=True).start()
+        self._start_web_server()
+        self._start_native_tray()
+        assert self.window is not None
+        self.window.show()
+        self.qt_app.exec()
+
+    def _build_native_window(self) -> None:
+        class MainWindow(QMainWindow):
+            def closeEvent(self, event: Any) -> None:
+                event.ignore()
+                self.hide()
+
+        self.window = MainWindow()
+        self.window.setWindowTitle("Govee H6001 Bluetooth")
+        self.window.setFixedSize(430, 460)
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("Govee H6001")
+        title.setObjectName("title")
+        layout.addWidget(title)
+        self.status_label = QLabel("Starte Bridge …")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        row = QHBoxLayout()
+        self.power_button = QPushButton("Lampe ausschalten")
+        self.power_button.clicked.connect(lambda _checked=False: self.toggle_power())
+        row.addWidget(self.power_button)
+        self.sync_checkbox = QCheckBox("SignalRGB-Sync")
+        self.sync_checkbox.toggled.connect(self._sync_changed)
+        row.addWidget(self.sync_checkbox)
+        layout.addLayout(row)
+
+        reconnect_button = QPushButton("Bluetooth neu verbinden")
+        reconnect_button.clicked.connect(lambda _checked=False: self.reconnect())
+        layout.addWidget(reconnect_button)
+
+        temp_row = QHBoxLayout()
+        temp_title = QLabel("Weißtemperatur")
+        temp_title.setObjectName("section")
+        self.kelvin_label = QLabel("2700 K")
+        temp_row.addWidget(temp_title)
+        temp_row.addStretch(1)
+        temp_row.addWidget(self.kelvin_label)
+        layout.addLayout(temp_row)
+        self.kelvin_slider = QSlider(Qt.Orientation.Horizontal)
+        self.kelvin_slider.setRange(MIN_KELVIN, MAX_KELVIN)
+        self.kelvin_slider.setSingleStep(50)
+        self.kelvin_slider.setPageStep(200)
+        self.kelvin_slider.setValue(2700)
+        self.kelvin_slider.valueChanged.connect(self._temperature_changed)
+        layout.addWidget(self.kelvin_slider)
+        ends = QHBoxLayout()
+        ends.addWidget(QLabel("Warm · 2700 K"))
+        ends.addStretch(1)
+        ends.addWidget(QLabel("Kalt · 6500 K"))
+        layout.addLayout(ends)
+        self.mode_label = QLabel("Warmweiß · 2700 K")
+        self.mode_label.setObjectName("muted")
+        layout.addWidget(self.mode_label)
+
+        layout.addSpacing(4)
+        phone_title = QLabel("Handy-Steuerung im selben WLAN")
+        phone_title.setObjectName("section")
+        layout.addWidget(phone_title)
+        layout.addWidget(QLabel(self.lan_url))
+        pin_row = QHBoxLayout()
+        pin_row.addWidget(QLabel(f"PIN: <b>{self.access_pin}</b>"))
+        copy_button = QPushButton("PIN kopieren")
+        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(self.access_pin))
+        pin_row.addWidget(copy_button)
+        pin_row.addStretch(1)
+        layout.addLayout(pin_row)
+        layout.addWidget(QLabel("Schließen blendet das Fenster nur in den Infobereich aus."))
+
+        exit_button = QPushButton("Beenden · Lampe auf WW-Kaltweiß")
+        exit_button.setObjectName("exit")
+        exit_button.clicked.connect(lambda _checked=False: self.quit())
+        layout.addWidget(exit_button)
+        layout.addStretch(1)
+        self.window.setCentralWidget(central)
+        self.window.setStyleSheet("""
+            QWidget { background: #f4f6fa; color: #202633; font: 10pt 'Segoe UI'; }
+            QLabel#title { font-size: 20pt; font-weight: 700; }
+            QLabel#section { font-size: 11pt; font-weight: 650; }
+            QLabel#muted { color: #647084; }
+            QPushButton { background: #e5eaf2; border: 1px solid #cbd3df; border-radius: 8px; padding: 9px 12px; }
+            QPushButton:hover { background: #dbe4f2; }
+            QPushButton#exit { background: #385fca; color: white; font-weight: 650; }
+            QSlider::groove:horizontal { height: 6px; background: #cbd3df; border-radius: 3px; }
+            QSlider::handle:horizontal { width: 18px; margin: -7px 0; border-radius: 9px; background: #385fca; }
+            QCheckBox { spacing: 7px; }
+        """)
+        self._white_timer = QTimer(self.window)
+        self._white_timer.setSingleShot(True)
+        self._white_timer.setInterval(150)
+        self._white_timer.timeout.connect(self._apply_slider_temperature)
+
+    def _start_native_tray(self) -> None:
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(80, 150, 245))
+        painter.setPen(QColor(245, 245, 245))
+        painter.drawEllipse(7, 7, 50, 50)
+        painter.setBrush(QColor(255, 255, 255))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(22, 22, 20, 20)
+        painter.end()
+
+        menu = QMenu()
+        open_action = QAction("Govee H6001 öffnen", menu)
+        open_action.triggered.connect(self.show_window)
+        menu.addAction(open_action)
+        menu.addSeparator()
+        power_action = QAction("Lampe Ein/Aus", menu)
+        power_action.triggered.connect(lambda _checked=False: self.toggle_power())
+        menu.addAction(power_action)
+        sync_action = QAction("SignalRGB-Sync umschalten", menu)
+        sync_action.triggered.connect(lambda _checked=False: self._sync_changed(
+            not (self.bridge.signalrgb_enabled if self.bridge else False)))
+        menu.addAction(sync_action)
+        reconnect_action = QAction("Bluetooth neu verbinden", menu)
+        reconnect_action.triggered.connect(lambda _checked=False: self.reconnect())
+        menu.addAction(reconnect_action)
+        menu.addSeparator()
+        exit_action = QAction("Beenden · WW-Kaltweiß", menu)
+        exit_action.triggered.connect(self.quit)
+        menu.addAction(exit_action)
+
+        self.tray_icon = QSystemTrayIcon(QIcon(pixmap), self.window)
+        self.tray_icon.setToolTip("Govee H6001 Bluetooth")
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.show()
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.show_window()
+
+    def _temperature_changed(self, kelvin: int) -> None:
+        if self.kelvin_label:
+            self.kelvin_label.setText(f"{kelvin} K")
+        if self._white_timer:
+            self._white_timer.start()
+
+    def _apply_slider_temperature(self) -> None:
+        if not self.bridge or not self.kelvin_slider:
+            return
+        kelvin = self.kelvin_slider.value()
+        if self.sync_checkbox:
+            blocker = QSignalBlocker(self.sync_checkbox)
+            self.sync_checkbox.setChecked(False)
+            del blocker
+        self.submit(self.bridge.set_white(kelvin))
+
+    def _sync_changed(self, enabled: bool) -> None:
+        if self.bridge:
+            self.submit(self.bridge.set_signalrgb(enabled))
+
+    def submit(self, coroutine: Any) -> None:
+        if self.loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+
+            def report_error(result: Any) -> None:
+                try:
+                    result.result()
+                except Exception as exc:
+                    log.exception("Desktop-Befehl fehlgeschlagen")
+                    self.set_status(f"Befehl fehlgeschlagen · {exc}")
+
+            future.add_done_callback(report_error)
+
+    def toggle_power(self, *_args: Any) -> None:
+        if self.bridge:
+            self.submit(self.bridge.set_power(not self.bridge.power_on))
+
+    def reconnect(self, *_args: Any) -> None:
+        if self.bridge:
+            self.submit(self.bridge.reconnect())
+
+    def set_status(self, message: str) -> None:
+        log.info("Status: %s", message)
+        self.status_text = message
+        self.signals.status.emit(message)
+
+    def set_mode(self, message: str) -> None:
+        self.mode_text = message
+        self.signals.mode.emit(message)
+
+    def set_power_state(self, enabled: bool) -> None:
+        self.signals.power.emit(enabled)
+
+    def set_sync_state(self, enabled: bool) -> None:
+        self.signals.sync.emit(enabled)
+
+    def _show_status(self, message: str) -> None:
+        if self.status_label:
+            self.status_label.setText(message)
+
+    def _show_mode(self, message: str) -> None:
+        if self.mode_label:
+            self.mode_label.setText(message)
+
+    def _show_power(self, enabled: bool) -> None:
+        if self.power_button:
+            self.power_button.setText("Lampe ausschalten" if enabled else "Lampe einschalten")
+
+    def _show_sync(self, enabled: bool) -> None:
+        if self.sync_checkbox:
+            blocker = QSignalBlocker(self.sync_checkbox)
+            self.sync_checkbox.setChecked(enabled)
+            del blocker
+
+    def show_window(self, *_args: Any) -> None:
+        if self.window:
+            self.window.show()
+            self.window.raise_()
+            self.window.activateWindow()
+
+    def quit(self, *_args: Any) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        if self.bridge and self.loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(self.bridge.prepare_to_exit(), self.loop)
+            try:
+                future.result(timeout=5)
+            except Exception:
+                log.exception("Fehler beim Beenden der Bridge")
+        if self.tray_icon:
+            self.tray_icon.hide()
+        if self.http_server:
+            self.http_server.shutdown()
+            self.http_server.server_close()
+        if self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.qt_app:
+            self.qt_app.quit()
 
 
 if __name__ == "__main__":
     try:
-        TrayApp().start()
+        NativeTrayApp().start()
     except Exception:
         log.exception("Tray-App konnte nicht gestartet werden")
