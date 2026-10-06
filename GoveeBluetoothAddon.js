@@ -9,7 +9,7 @@ const BRIDGE_PORT = 8765;
 const CONTROLLER_ID = `govee-h6001-${TARGET_ADDRESS.replaceAll(":", "").toLowerCase()}`;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.3.0"; }
+export function Version() { return "0.3.1"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -55,23 +55,24 @@ export function DiscoveryService() {
     this.lastPollTime = 0;
     this.controller = null;
     this.connected = false;
-    this.controlSocket = null;
-    this.replySocket = null;
+    this.socket = null;
 
     this.Initialize = function () {
-        this.controlSocket = udp.createSocket();
-        this.replySocket = udp.createSocket();
-        this.replySocket.on("message", this.handleBridgeMessage.bind(this));
-        this.replySocket.on("error", (error) => service.log(`Bridge UDP error: ${error}`));
-        this.replySocket.bind(8766);
+        // Use the same bound UDP socket for requests and replies. Otherwise the
+        // bridge answers the ephemeral source port and SignalRGB never sees status.
+        this.socket = udp.createSocket();
+        this.socket.on("message", this.handleBridgeMessage.bind(this));
+        this.socket.on("error", (error) => service.log(`Bridge UDP error: ${error}`));
+        this.socket.bind(8766);
+        service.log("Govee add-on status socket bound to UDP 8766");
         this.lastPollTime = 0;
     };
 
     this.Update = function () {
         const now = Date.now();
-        if (!this.controlSocket || now - this.lastPollTime < this.PollInterval) return;
+        if (!this.socket || now - this.lastPollTime < this.PollInterval) return;
         this.lastPollTime = now;
-        this.controlSocket.write(JSON.stringify({ command: "status" }), BRIDGE_HOST, BRIDGE_PORT);
+        this.socket.write(JSON.stringify({ command: "status" }), BRIDGE_HOST, BRIDGE_PORT);
     };
 
     this.handleBridgeMessage = function (packet) {
@@ -82,6 +83,7 @@ export function DiscoveryService() {
             service.log(`Invalid bridge response: ${error}`);
             return;
         }
+        service.log(`Bridge status received: connected=${message.connected}`);
         if (message.type !== "status") return;
 
         if (message.connected && !this.connected) {
@@ -99,8 +101,7 @@ export function DiscoveryService() {
     };
 
     this.Shutdown = function () {
-        if (this.controlSocket) this.controlSocket.close();
-        if (this.replySocket) this.replySocket.close();
+        if (this.socket) this.socket.close();
     };
 }
 

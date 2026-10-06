@@ -8,7 +8,8 @@ add-on communication API does not expose BLE directly.
 
 ## Files
 
-- `GoveeBluetoothAddon.js` — SignalRGB Add-on source. Polls the bridge status,
+- `GoveeBluetoothAddon.js` — SignalRGB Add-on source. Polls the bridge status
+  over a bound UDP socket on port 8766,
   announces the virtual device only after BLE is connected, provides lighting
   controls/settings, and sends canvas color changes over UDP.
 - `GoveeBluetoothAddon.qml` — Add-on information panel.
