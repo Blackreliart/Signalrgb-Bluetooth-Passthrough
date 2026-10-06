@@ -12,6 +12,8 @@ SERVICE_UUID = "00010203-0405-0607-0809-0a0b0c0d1910"
 WRITE_UUID = "00010203-0405-0607-0809-0a0b0c0d2b11"
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 8765
+TARGET_ADDRESS = "A4:C1:38:75:0B:F9"
+TARGET_NAME = "Minger_H6001_0BF9"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("govee-ble-bridge")
@@ -59,8 +61,9 @@ class Bridge(asyncio.DatagramProtocol):
         try:
             if command == "scan":
                 found = await BleakScanner.discover(timeout=6.0)
-                devices = [{"name": d.name or "BLE-Gerät", "address": d.address,
-                            "rssi": getattr(d, "rssi", None)} for d in found]
+                devices = [{"name": d.name or TARGET_NAME, "address": d.address,
+                            "rssi": getattr(d, "rssi", None)} for d in found
+                           if d.address.casefold() == TARGET_ADDRESS.casefold()]
                 self.reply(addr, {"type": "scan_result", "devices": devices})
             elif command == "connect":
                 await self.connect(str(message.get("address", "")))
@@ -82,6 +85,8 @@ class Bridge(asyncio.DatagramProtocol):
     async def connect(self, address: str) -> None:
         if not address:
             raise ValueError("Keine Bluetooth-Adresse angegeben")
+        if address.casefold() != TARGET_ADDRESS.casefold():
+            raise ValueError(f"Diese Bridge erlaubt nur {TARGET_NAME} ({TARGET_ADDRESS})")
         async with self.lock:
             await self.disconnect()
             device = await BleakScanner.find_device_by_address(address, timeout=8.0)
@@ -126,25 +131,14 @@ class Bridge(asyncio.DatagramProtocol):
 async def main() -> None:
     loop = asyncio.get_running_loop()
     bridge = Bridge()
-    print("Suche 8 Sekunden nach Bluetooth-Geräten …")
-    devices = await BleakScanner.discover(timeout=8.0)
-    candidates = [d for d in devices if any(tag in (d.name or "").lower()
-                  for tag in ("govee", "minger", "h6001"))]
-    if not candidates:
-        candidates = devices
-    if not candidates:
-        raise RuntimeError("Keine BLE-Geräte gefunden. H6001 einschalten und erneut starten.")
-    print("\nGefundene Geräte:")
-    for index, device in enumerate(candidates):
-        print(f"[{index}] {device.name or 'Unbenannt'} — {device.address}")
-    while True:
-        selected = input("Nummer der H6001 (q zum Beenden): ").strip()
-        if selected.lower() == "q":
-            return
-        if selected.isdigit() and int(selected) < len(candidates):
-            await bridge.connect(candidates[int(selected)].address)
-            break
-        print("Bitte eine gültige Nummer auswählen.")
+    print(f"Suche ausschließlich {TARGET_NAME} ({TARGET_ADDRESS}) …")
+    device = await BleakScanner.find_device_by_address(TARGET_ADDRESS, timeout=12.0)
+    if device is None:
+        raise RuntimeError(
+            f"{TARGET_NAME} ({TARGET_ADDRESS}) nicht gefunden. "
+            "Lampe einschalten, in Bluetooth-Reichweite bringen und erneut starten."
+        )
+    await bridge.connect(device.address)
     transport, _ = await loop.create_datagram_endpoint(
         lambda: bridge, local_addr=(BRIDGE_HOST, BRIDGE_PORT)
     )

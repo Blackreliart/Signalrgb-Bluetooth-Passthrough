@@ -1,14 +1,16 @@
 # Govee Bluetooth for SignalRGB (prototype)
 
 This repository contains a SignalRGB Add-on source file and a local Bluetooth
-bridge. SignalRGB loads the add-on source; the bridge connects to a Govee H6001
-over BLE because SignalRGB's documented add-on communication API does not expose
-BLE directly.
+bridge. The current setup is locked to the user's Minger H6001 at
+`A4:C1:38:75:0B:F9`; other BLE devices are ignored. SignalRGB loads the add-on
+source; the bridge controls the bulb over BLE because SignalRGB's documented
+add-on communication API does not expose BLE directly.
 
 ## Files
 
 - `GoveeBluetoothAddon.js` — SignalRGB device source. Samples the one-pixel
-  canvas and sends color changes to the local bridge over UDP.
+  canvas, announces the fixed virtual device through `DiscoveryService()`, and
+  sends color changes to the local bridge over UDP.
 - `GoveeBluetoothAddon.qml` — Add-on information panel.
 - `bridge.py` — local BLE bridge, device scanner, and H6001 command encoder.
 
@@ -23,9 +25,9 @@ py -m pip install -r requirements.txt
 py bridge.py
 ```
 
-The bridge scans at startup, shows nearby Bluetooth devices, and asks you to
-select the H6001. After connecting, it listens only on `127.0.0.1:8765` and
-accepts JSON UDP messages:
+The bridge searches only for `Minger_H6001_0BF9` at `A4:C1:38:75:0B:F9`, connects
+automatically, and listens only on `127.0.0.1:8765`. It accepts JSON UDP
+messages:
 
 - `{"command":"scan"}` — scan nearby BLE devices and reply to the sender.
 - `{"command":"connect","address":"AA:BB:CC:DD:EE:FF"}` — connect to a device.
@@ -34,16 +36,16 @@ accepts JSON UDP messages:
 
 Start the bridge before activating the SignalRGB add-on. The add-on sends color
 updates automatically after the BLE connection is established. The Add-on
-panel currently displays setup information; device selection happens in the
-bridge console.
+panel currently displays setup information. To target a different bulb later,
+change `TARGET_ADDRESS` and `TARGET_NAME` in `bridge.py`.
 
 ## SignalRGB Add-on
 
 Add this GitHub repository as a SignalRGB Add-on after pushing it to GitHub.
 SignalRGB's Add-on loader and UI have version-specific expectations, so the
-source may need minor adjustments for the installed SignalRGB version. The
-current source files provide the Add-on bundle foundation; they have not yet
-been tested in SignalRGB or against a physical H6001.
+source may need minor adjustments for the installed SignalRGB version. Version
+0.2.0 now includes the discovery service needed to announce the virtual H6001
+device. It has not yet been tested in SignalRGB or against the physical bulb.
 
 ## H6001 protocol
 

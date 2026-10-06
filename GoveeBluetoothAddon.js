@@ -1,16 +1,15 @@
-// SignalRGB network device component distributed as a SignalRGB Add-on.
-// The companion bridge performs BLE; this file only samples the canvas and
-// sends local UDP messages to 127.0.0.1:8765.
+// SignalRGB Add-on for one fixed Govee H6001 BLE bulb.
+// DiscoveryService announces a virtual network controller to SignalRGB;
+// Initialize/Render sample its one LED and send colors to the local BLE bridge.
 import udp from "@SignalRGB/udp";
 
+const TARGET_ADDRESS = "A4:C1:38:75:0B:F9";
 const BRIDGE_HOST = "127.0.0.1";
 const BRIDGE_PORT = 8765;
-let socket;
-let connected = false;
-let lastColor = "";
+const CONTROLLER_ID = `govee-h6001-${TARGET_ADDRESS.replaceAll(":", "").toLowerCase()}`;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.1.0"; }
+export function Version() { return "0.2.0"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -18,35 +17,94 @@ export function LedNames() { return ["H6001 Bulb"]; }
 export function LedPositions() { return [[0, 0]]; }
 export function DefaultPosition() { return [0, 70]; }
 export function DefaultScale() { return 1.0; }
+export function DefaultComponentBrand() { return "Govee"; }
 export function Validate() { return true; }
+export function SubdeviceController() { return false; }
 
 export function ControllableParameters() {
     return [
-        { property: "enableOutput", group: "lighting", label: "Send colors to H6001", type: "boolean", default: true },
-        { property: "frameDelay", group: "settings", label: "Minimum delay (ms)", type: "number", min: "50", max: "500", step: "25", default: "50" }
+        { property: "enableOutput", group: "lighting", label: "Send colors to H6001", type: "combobox", values: ["Enabled", "Disabled"], default: "Enabled" },
+        { property: "frameDelay", group: "settings", label: "Minimum frame delay (ms)", type: "combobox", values: ["50", "100", "200"], default: "50" }
     ];
 }
 
+class H6001Controller {
+    constructor() {
+        this.device = {
+            id: CONTROLLER_ID,
+            address: TARGET_ADDRESS,
+            name: "Minger H6001 (Bluetooth)",
+            leds: 1,
+            getName() { return this.name; }
+        };
+        this.id = CONTROLLER_ID;
+        this.name = this.device.name;
+        this.changed = false;
+        this.connected = false;
+        this.statusData = {};
+        this.messageQueue = [];
+    }
+    toCacheJSON() {
+        return { id: this.id, address: TARGET_ADDRESS, name: this.name, leds: 1 };
+    }
+}
+
+export function DiscoveryService() {
+    this.IconUrl = "";
+    this.PollInterval = 5000;
+    this.lastPollTime = 0;
+    this.controller = null;
+
+    this.Initialize = function () {
+        this.controller = new H6001Controller();
+        if (!service.hasController(CONTROLLER_ID)) {
+            service.addController(this.controller);
+            service.announceController(this.controller);
+            service.log(`Announced ${this.controller.name} (${TARGET_ADDRESS})`);
+        }
+    };
+
+    this.Update = function () {
+        if (!this.controller) this.Initialize();
+        if (!service.hasController(CONTROLLER_ID)) {
+            service.addController(this.controller);
+            service.announceController(this.controller);
+        }
+    };
+}
+
+let socket;
+let lastColor = "";
+let lastFrameAt = 0;
+
 export function Initialize() {
     socket = udp.createSocket();
-    connected = true;
-    device.log("Govee Bluetooth Add-on started. Check the local BLE bridge.");
+    device.setName(controller.device.getName());
+    device.setSize([1, 1]);
+    device.setControllableLeds(["H6001 Bulb"], [[0, 0]]);
+    device.log(`Govee H6001 add-on ready for ${TARGET_ADDRESS}; bridge must be running.`);
 }
 
 export function Render() {
-    if (!connected || !enableOutput || !socket) return;
-    const sample = device.color(0, 0);
-    if (!sample || sample.length < 3) return;
-    const rgb = sample.slice(0, 3).map((channel) =>
+    if (enableOutput === "Disabled" || !socket) return;
+    const now = Date.now();
+    const delay = Number.parseInt(frameDelay, 10) || 50;
+    if (now - lastFrameAt < delay) return;
+
+    const sampled = device.color(0, 0);
+    if (!sampled || sampled.length < 3) return;
+    const rgb = sampled.slice(0, 3).map((channel) =>
         Math.max(0, Math.min(255, Math.round(channel)))
     );
     const key = rgb.join(",");
     if (key === lastColor) return;
+
     socket.write(JSON.stringify({ command: "color", rgb }), BRIDGE_HOST, BRIDGE_PORT);
     lastColor = key;
+    lastFrameAt = now;
 }
 
 export function Shutdown() {
-    connected = false;
     if (socket) socket.close();
+    socket = null;
 }
