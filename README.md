@@ -1,58 +1,39 @@
-# Govee Bluetooth for SignalRGB (prototype)
+# Govee H6001 Bluetooth Bridge für SignalRGB
 
-This repository contains a SignalRGB Add-on source file and a local Bluetooth
-bridge. The current setup is locked to the user's Minger H6001 at
-`A4:C1:38:75:0B:F9`; other BLE devices are ignored. SignalRGB loads the add-on
-source; the bridge controls the bulb over BLE because SignalRGB's documented
-add-on communication API does not expose BLE directly.
+Die Bridge verbindet ausschließlich die Govee/Minger H6001 mit der Bluetooth-Adresse `A4:C1:38:75:0B:F9`. Sie läuft als Windows-Anwendung mit Symbol im Infobereich. SignalRGB sendet Farben über das lokale UDP-Protokoll an die Bridge; ein zusätzliches Konsolenfenster ist nicht nötig.
 
-## Files
+Beim Programmstart ist SignalRGB-Sync ausgeschaltet und die Lampe startet mit warmem Weiß (2700 K). Der Regler bildet den Bereich von 2700 bis 6500 K mathematisch in Mireds (Kehrwert der Kelvin-Temperatur) ab. Gesendet wird ein H6001-Paket mit aktiviertem WW-Modus; die RGB-Kanäle sind dabei nicht ausgewählt. Beim Ausschalten von SignalRGB-Sync wird der aktuelle Kelvinwert erneut im WW-Modus gesendet und ersetzt den vorherigen RGB-Farbton.
 
-- `GoveeBluetoothAddon.js` — SignalRGB Add-on source. Polls the bridge status
-  over a bound UDP socket on port 8766,
-  announces the virtual device only after BLE is connected, provides lighting
-  controls/settings, and sends canvas color changes over UDP.
-- `GoveeBluetoothAddon.qml` — Add-on information panel.
-- `bridge.py` — local BLE bridge, device scanner, and H6001 command encoder.
+Zusätzlich läuft ein lokaler Webserver für die Handy-Steuerung. Handy und PC müssen im selben WLAN sein. Öffne die im Bridge-Fenster angezeigte Adresse auf dem Handy und gib die dort angezeigte sechsstellige PIN ein. Die Weboberfläche bietet Ein/Aus, SignalRGB-Sync und den Temperaturregler. Der Server ist nur im lokalen Netzwerk gedacht und mit der Start-PIN geschützt.
 
-## Start the bridge
+Vor dem Beenden setzt die Bridge eine eingeschaltete Lampe auf 6500 K Kaltweiß im WW-Modus und trennt danach Bluetooth. Das geht über **Beenden · Lampe auf WW-Kaltweiß** im Fenster oder **Beenden · WW-Kaltweiß** im Tray-Menü. Über **Bluetooth neu verbinden** im Fenster oder auf der Handy-Webseite kannst du die Verbindung manuell neu aufbauen.
 
-Requires Windows 10/11, Python 3.10+, Bluetooth LE, and the H6001 powered on.
+## Einrichten
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-py -m pip install -r requirements.txt
-py bridge.py
-```
+1. Python 3.10 oder neuer installieren.
+2. In diesem Ordner einmalig die Abhängigkeiten installieren:
 
-The bridge searches only for `Minger_H6001_0BF9` at `A4:C1:38:75:0B:F9`, connects
-automatically, and listens only on `127.0.0.1:8765`. It accepts JSON UDP
-messages:
+   ```powershell
+   py -m pip install -r requirements.txt
+   ```
 
-- `{"command":"scan"}` — scan nearby BLE devices and reply to the sender.
-- `{"command":"connect","address":"AA:BB:CC:DD:EE:FF"}` — connect to a device.
-- `{"command":"color","rgb":[255,0,0]}` — set the bulb color.
-- `{"command":"disconnect"}` — disconnect.
+3. Bridge starten:
 
-Start the bridge before activating the SignalRGB add-on. After the BLE link is
-up, the add-on should announce a separate H6001 device in SignalRGB; its lighting
-page includes the output toggle and frame delay setting. The add-on panel shows
-setup information. To target a different bulb later, change `TARGET_ADDRESS`
-and `TARGET_NAME` in `bridge.py` and `TARGET_ADDRESS` in the add-on source.
+   ```powershell
+   pythonw bridge.py
+   ```
 
-## SignalRGB Add-on
+   Oder `Start_GoveeBridge.vbs` doppelklicken. Der Starter öffnet die Bridge ohne sichtbares Terminalfenster.
+4. `GoveeBluetoothAddon.js` wie bisher in SignalRGB laden. Die Bridge muss laufen, bevor das Add-on das H6001-Gerät anmeldet.
 
-Add this GitHub repository as a SignalRGB Add-on after pushing it to GitHub.
-SignalRGB's Add-on loader and UI have version-specific expectations, so the
-source may need minor adjustments for the installed SignalRGB version. Version
-0.3.3 defines the device ID and address inside the discovery-service context
-used by SignalRGB. It has not yet been retested in SignalRGB after this
-correction.
+## Bedienung
 
-## H6001 protocol
+- **Lampe ein-/ausschalten** steuert die H6001 direkt.
+- **SignalRGB-Sync** schaltet die RGB-Übertragung ein oder pausiert sie. Beim Pausieren verwendet die Lampe die eingestellte Weißtemperatur.
+- Mit dem **Weißtemperatur-Regler** stellst du den Weißton zwischen 2700 K (warm) und 6500 K (kalt) ein. Beim Verstellen wird die SignalRGB-Synchronisierung pausiert; zum Fortsetzen den Haken wieder aktivieren.
+- Das Fenster-Schließen blendet die Anwendung in den Infobereich neben der Uhr aus. Über das Tray-Symbol lässt sich das Fenster öffnen, die Lampe schalten oder die Bridge beenden.
+- Die Handy-Oberfläche erreichst du über die angezeigte `http://...:8767`-Adresse. Falls Windows die Verbindung blockiert, muss Python im privaten Netzwerk durch die Firewall dürfen.
+- **Bluetooth neu verbinden** trennt die bestehende BLE-Verbindung und startet die Suche nach genau der hinterlegten H6001-Adresse erneut.
+- Das Schließen des Fensters blendet es nur in den Infobereich aus. Zum Beenden den neuen **Beenden**-Knopf oder das Tray-Menü verwenden; dabei wird zuerst WW-Kaltweiß gesetzt.
 
-The encoder uses the H6001 manual color command documented by community
-reverse-engineering work: `0x33` prefix, command `0x05`, manual mode `0x02`, RGB
-bytes, zero padding, and XOR checksum. H6001 hardware revisions and Bluetooth
-adapter behavior still need verification.
+Die Bridge schreibt keine laufenden Statusmeldungen in ein Konsolenfenster. Das rotierende Protokoll liegt unter `%LOCALAPPDATA%\GoveeSignalRGB\bridge.log`.

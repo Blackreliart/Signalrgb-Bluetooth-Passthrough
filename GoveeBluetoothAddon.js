@@ -8,7 +8,7 @@ const BRIDGE_HOST = "127.0.0.1";
 const BRIDGE_PORT = 8765;
 
 export function Name() { return "Govee H6001 Bluetooth"; }
-export function Version() { return "0.3.3"; }
+export function Version() { return "0.4.0"; }
 export function Publisher() { return "Community"; }
 export function Type() { return "network"; }
 export function Size() { return [1, 1]; }
@@ -37,6 +37,7 @@ export function DiscoveryService() {
     this.lastPollTime = 0;
     this.controller = null;
     this.connected = false;
+    this.lastBridgeStatus = null;
     this.socket = null;
 
     // Keep the factory inside DiscoveryService. SignalRGB evaluates service
@@ -70,8 +71,9 @@ export function DiscoveryService() {
         // bridge answers the ephemeral source port and SignalRGB never sees status.
         this.socket = udp.createSocket();
         this.socket.on("message", this.handleBridgeMessage.bind(this));
-        this.socket.on("error", (errorId, errorMessage) =>
-            service.log(`Bridge UDP error ${errorId}: ${errorMessage || ""}`));
+        this.socket.on("error", (errorId, errorMessage) => {
+            if (errorId !== 0) service.log(`Bridge UDP error ${errorId}: ${errorMessage || ""}`);
+        });
         this.socket.bind(8766);
         service.log("Govee add-on status socket bound to UDP 8766");
         this.lastPollTime = 0;
@@ -92,8 +94,11 @@ export function DiscoveryService() {
             service.log(`Invalid bridge response: ${error}`);
             return;
         }
-        service.log(`Bridge status received: connected=${message.connected}`);
         if (message.type !== "status") return;
+        if (this.lastBridgeStatus !== message.connected) {
+            this.lastBridgeStatus = message.connected;
+            service.log(`Bridge status changed: connected=${message.connected}`);
+        }
 
         if (message.connected && !this.connected) {
             this.controller = this.makeController();
@@ -139,10 +144,11 @@ export function Render() {
         Math.max(0, Math.min(255, Math.round(channel)))
     );
     const key = rgb.join(",");
-    if (key === lastColor) return;
+    // Repeat the current frame once per second so re-enabling SignalRGB sync
+    // in the tray app resumes output even if the canvas color did not change.
+    if (key === lastColor && now - lastFrameAt < 1000) return;
 
     socket.write(JSON.stringify({ command: "color", rgb }), BRIDGE_HOST, BRIDGE_PORT);
-    device.log(`Sent color to BLE bridge: RGB ${key}`);
     lastColor = key;
     lastFrameAt = now;
 }
